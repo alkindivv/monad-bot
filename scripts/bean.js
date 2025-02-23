@@ -9,18 +9,48 @@ const EXPLORER_URL = "https://testnet.monadexplorer.com/tx/";
 // Contract addresses
 const ROUTER_ADDRESS = "0xca810d095e90daae6e867c19df6d9a8c56db2c89";
 const WMON_ADDRESS = "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701";
-const USDC_ADDRESS = "0xf817257fed379853cde0fa4f97ab987181b1e5ea";
+
+// Daftar token yang didukung
+const TOKENS = {
+  USDC: {
+    address: "0xf817257fed379853cde0fa4f97ab987181b1e5ea",
+    symbol: "USDC",
+    name: "USD Coin",
+    minAmount: 0.01,
+    maxAmount: 1,
+    decimals: 6,
+  },
+  USDT: {
+    address: "0x88b8E2161DEDC77EF4ab7585569D2415a1C1055D",
+    symbol: "USDT",
+    name: "Tether USD",
+    minAmount: 0.01,
+    maxAmount: 1,
+    decimals: 6,
+  },
+  WETH: {
+    address: "0xB5a30b0FDc5EA94A52fDc42e3E9760Cb8449Fb37",
+    symbol: "WETH",
+    name: "Wrapped ETH",
+    minAmount: 0.0000001,
+    maxAmount: 0.000001,
+    decimals: 18,
+    retryDelay: 5000, // delay in ms before retry
+    maxRetries: 3, // maksimum jumlah retry
+  },
+};
 
 // Initialize provider dan wallet
 const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
 
-// ABI untuk approve USDC
+// ABI untuk approve token
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function balanceOf(address account) external view returns (uint256)",
   "function decimals() external view returns (uint8)",
+  "function symbol() external view returns (string)",
 ];
 
 // Fungsi untuk mendapatkan angka random antara min dan max
@@ -28,31 +58,32 @@ function getRandomAmount(min, max) {
   return Math.random() * (max - min) + min;
 }
 
-async function approveUSDC(amount) {
+async function approveToken(tokenAddress, amount) {
   try {
-    console.log("🔄 Mengecek approval USDC...".yellow);
+    console.log("🔄 Mengecek approval token...".yellow);
 
-    const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, wallet);
-    const decimals = await usdcContract.decimals();
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+    const symbol = await tokenContract.symbol();
+    const decimals = await tokenContract.decimals();
     const amountInDecimals = ethers.utils.parseUnits(
       amount.toString(),
       decimals
     );
 
-    const allowance = await usdcContract.allowance(
+    const allowance = await tokenContract.allowance(
       wallet.address,
       ROUTER_ADDRESS
     );
     if (allowance.lt(amountInDecimals)) {
-      console.log("🔄 Melakukan approve USDC...".yellow);
-      const tx = await usdcContract.approve(
+      console.log(`🔄 Melakukan approve ${symbol}...`.yellow);
+      const tx = await tokenContract.approve(
         ROUTER_ADDRESS,
         ethers.constants.MaxUint256
       );
       await tx.wait();
-      console.log("✅ USDC berhasil diapprove".green);
+      console.log(`✅ ${symbol} berhasil diapprove`.green);
     } else {
-      console.log("✅ USDC sudah diapprove sebelumnya".green);
+      console.log(`✅ ${symbol} sudah diapprove sebelumnya`.green);
     }
     return amountInDecimals;
   } catch (error) {
@@ -61,12 +92,62 @@ async function approveUSDC(amount) {
   }
 }
 
-async function swapUsdcToMon(amount) {
+async function retryOperation(operation, maxRetries = 3, delay = 5000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        error.message.includes("bad response") ||
+        error.message.includes("SERVER_ERROR")
+      ) {
+        if (i < maxRetries - 1) {
+          console.log(
+            `❌ RPC Node error, mencoba ulang dalam ${delay / 1000} detik... (Percobaan ${i + 1}/${maxRetries})`
+              .yellow
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      throw error;
+    }
+  }
+  throw new Error("Maksimum retry tercapai");
+}
+
+async function checkTokenAvailability(token) {
+  const operation = async () => {
+    const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
+    await tokenContract.balanceOf(wallet.address);
+    return true;
+  };
+
   try {
-    console.log(`🔄 Swapping ${amount} USDC to MON...`.yellow);
+    return await retryOperation(
+      operation,
+      token.maxRetries || 3,
+      token.retryDelay || 5000
+    );
+  } catch (error) {
+    console.log(
+      `⚠️ Token ${token.symbol} tidak tersedia: ${error.message}`.yellow
+    );
+    return false;
+  }
+}
+
+async function swapTokenToMon(tokenSymbol, amount) {
+  const token = TOKENS[tokenSymbol];
+  try {
+    // Cek dulu apakah token bisa diakses
+    const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
+    await tokenContract.balanceOf(wallet.address); // Test if token is accessible
+
+    console.log(`🔄 Swapping ${amount} ${tokenSymbol} to MON...`.yellow);
 
     // Approve dulu
-    const amountInDecimals = await approveUSDC(amount);
+    const amountInDecimals = await approveToken(token.address, amount);
 
     // Method swapExactTokensForETH
     const data = ethers.utils.hexConcat([
@@ -76,7 +157,7 @@ async function swapUsdcToMon(amount) {
         [
           amountInDecimals, // amountIn
           0, // amountOutMin
-          [USDC_ADDRESS, WMON_ADDRESS], // path
+          [token.address, WMON_ADDRESS], // path
           wallet.address, // recipient
           Math.floor(Date.now() / 1000) + 1200, // deadline 20 menit
         ]
@@ -95,7 +176,6 @@ async function swapUsdcToMon(amount) {
     const receipt = await tx.wait();
     if (receipt.status === 1) {
       console.log(`✅ Swap berhasil!`.green);
-      // Cek transfer events
       const transferEvents = receipt.logs.filter(
         (log) =>
           log.topics[0] ===
@@ -116,10 +196,12 @@ async function swapUsdcToMon(amount) {
   }
 }
 
-async function swapMonToUsdc(amountIn) {
+async function swapMonToToken(tokenSymbol, amountIn) {
+  const token = TOKENS[tokenSymbol];
   try {
     console.log(
-      `🔄 Swapping ${ethers.utils.formatEther(amountIn)} MON to USDC...`.yellow
+      `🔄 Swapping ${ethers.utils.formatEther(amountIn)} MON to ${tokenSymbol}...`
+        .yellow
     );
 
     // Method swapExactEthForTokens
@@ -132,7 +214,7 @@ async function swapMonToUsdc(amountIn) {
           160, // offset untuk path array (0xa0 in hex)
           wallet.address, // recipient
           Math.floor(Date.now() / 1000) + 1200, // deadline 20 menit
-          [WMON_ADDRESS, USDC_ADDRESS], // path swap
+          [WMON_ADDRESS, token.address], // path swap
         ]
       ),
     ]);
@@ -176,41 +258,87 @@ async function swapMonToUsdc(amountIn) {
 }
 
 async function checkBalance() {
-  const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, wallet);
-  const balance = await usdcContract.balanceOf(wallet.address);
-  const decimals = await usdcContract.decimals();
-  console.log(
-    `💰 USDC Balance: ${ethers.utils.formatUnits(balance, decimals)}`.cyan
-  );
+  console.log("\n💰 Balance:".cyan);
 
-  const monBalance = await provider.getBalance(wallet.address);
-  console.log(`💰 MON Balance: ${ethers.utils.formatEther(monBalance)}`.cyan);
+  try {
+    // Check MON balance
+    const monBalance = await provider.getBalance(wallet.address);
+    console.log(`MON: ${ethers.utils.formatEther(monBalance)}`.cyan);
+
+    // Check semua token balance
+    for (const [symbol, token] of Object.entries(TOKENS)) {
+      try {
+        const tokenContract = new ethers.Contract(
+          token.address,
+          ERC20_ABI,
+          wallet
+        );
+        const balance = await tokenContract.balanceOf(wallet.address);
+        console.log(
+          `${symbol}: ${ethers.utils.formatUnits(balance, token.decimals)}`.cyan
+        );
+      } catch (error) {
+        console.log(`${symbol}: Error membaca balance`.red);
+        console.error(`Error detail untuk ${symbol}:`.red, error.message);
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error mengecek balance:".red, error.message);
+  }
 }
 
 async function performRandomSwap() {
-  // Random pilih antara MON ke USDC atau USDC ke MON
-  const isMonToUsdc = Math.random() < 0.5;
+  try {
+    // Random pilih antara MON ke Token atau Token ke MON
+    const isMonToToken = Math.random() < 0.5;
 
-  if (isMonToUsdc) {
-    // MON ke USDC (0.001 - 0.01 MON)
-    const randomAmount = getRandomAmount(0.001, 0.01);
-    console.log(
-      `\n🎲 Random swap MON ke USDC: ${randomAmount.toFixed(6)} MON`.yellow
-    );
-    const amount = ethers.utils.parseEther(randomAmount.toFixed(6));
-    return await swapMonToUsdc(amount);
-  } else {
-    // USDC ke MON (0.1 - 1 USDC)
-    const randomAmount = getRandomAmount(0.1, 1);
-    console.log(
-      `\n🎲 Random swap USDC ke MON: ${randomAmount.toFixed(6)} USDC`.yellow
-    );
-    return await swapUsdcToMon(randomAmount.toFixed(6));
+    // Random pilih token yang berfungsi
+    const tokenSymbols = Object.keys(TOKENS);
+    let availableTokens = [];
+
+    // Cek token yang tersedia
+    for (const symbol of tokenSymbols) {
+      const token = TOKENS[symbol];
+      if (await checkTokenAvailability(token)) {
+        availableTokens.push(symbol);
+      }
+    }
+
+    if (availableTokens.length === 0) {
+      console.log("❌ Tidak ada token yang tersedia untuk swap".red);
+      return false;
+    }
+
+    const randomTokenSymbol =
+      availableTokens[Math.floor(Math.random() * availableTokens.length)];
+    const token = TOKENS[randomTokenSymbol];
+
+    if (isMonToToken) {
+      // MON ke Token (0.001 - 0.01 MON)
+      const randomAmount = getRandomAmount(0.001, 0.01);
+      console.log(
+        `\n🎲 Random swap MON ke ${randomTokenSymbol}: ${randomAmount.toFixed(6)} MON`
+          .yellow
+      );
+      const amount = ethers.utils.parseEther(randomAmount.toFixed(6));
+      return await swapMonToToken(randomTokenSymbol, amount);
+    } else {
+      // Token ke MON
+      const randomAmount = getRandomAmount(token.minAmount, token.maxAmount);
+      console.log(
+        `\n🎲 Random swap ${randomTokenSymbol} ke MON: ${randomAmount.toFixed(6)} ${randomTokenSymbol}`
+          .yellow
+      );
+      return await swapTokenToMon(randomTokenSymbol, randomAmount.toFixed(6));
+    }
+  } catch (error) {
+    console.error("❌ Error dalam random swap:".red, error.message);
+    return false;
   }
 }
 
 async function main() {
-  console.log(`\n🚀 Bean Random Swap Bot - MON <> USDC`.green);
+  console.log(`\n🚀 Bean Random Swap Bot - Multi Token`.green);
 
   // Tampilkan balance
   await checkBalance();
@@ -218,8 +346,8 @@ async function main() {
   // Menu pilihan
   const choices = [
     { title: "Mulai Random Swap", value: "random_swap" },
-    { title: "Swap Manual MON ke USDC", value: "mon_to_usdc" },
-    { title: "Swap Manual USDC ke MON", value: "usdc_to_mon" },
+    { title: "Swap Manual MON ke Token", value: "mon_to_token" },
+    { title: "Swap Manual Token ke MON", value: "token_to_mon" },
     { title: "Exit", value: "exit" },
   ];
 
@@ -261,7 +389,6 @@ async function main() {
         console.log(`\n📍 Random Swap ${i + 1}/${countResponse.count}:`.yellow);
         const success = await performRandomSwap();
 
-        // Tampilkan balance setelah swap
         if (success) {
           console.log("\n📊 Balance setelah swap:".yellow);
           await checkBalance();
@@ -278,7 +405,20 @@ async function main() {
         }
         console.log("\n" + "=".repeat(50) + "\n");
       }
-    } else if (response.action === "mon_to_usdc") {
+    } else if (response.action === "mon_to_token") {
+      // Pilih token tujuan
+      const tokenChoices = Object.entries(TOKENS).map(([symbol, token]) => ({
+        title: `${token.name} (${symbol})`,
+        value: symbol,
+      }));
+
+      const tokenResponse = await prompts({
+        type: "select",
+        name: "token",
+        message: "Pilih token tujuan:",
+        choices: tokenChoices,
+      });
+
       const amountResponse = await prompts({
         type: "number",
         name: "amount",
@@ -289,18 +429,36 @@ async function main() {
             ? true
             : "Jumlah harus antara 0.001 - 0.01",
       });
+
       const amount = ethers.utils.parseEther(amountResponse.amount.toString());
-      await swapMonToUsdc(amount);
-    } else if (response.action === "usdc_to_mon") {
+      await swapMonToToken(tokenResponse.token, amount);
+    } else if (response.action === "token_to_mon") {
+      // Pilih token sumber
+      const tokenChoices = Object.entries(TOKENS).map(([symbol, token]) => ({
+        title: `${token.name} (${symbol})`,
+        value: symbol,
+      }));
+
+      const tokenResponse = await prompts({
+        type: "select",
+        name: "token",
+        message: "Pilih token sumber:",
+        choices: tokenChoices,
+      });
+
+      const token = TOKENS[tokenResponse.token];
       const amountResponse = await prompts({
         type: "number",
         name: "amount",
-        message: "Masukkan jumlah USDC yang ingin di-swap (0.1 - 1):",
-        initial: 0.5,
+        message: `Masukkan jumlah ${tokenResponse.token} yang ingin di-swap (${token.minAmount} - ${token.maxAmount}):`,
+        initial: (token.minAmount + token.maxAmount) / 2,
         validate: (value) =>
-          value >= 0.1 && value <= 1 ? true : "Jumlah harus antara 0.1 - 1",
+          value >= token.minAmount && value <= token.maxAmount
+            ? true
+            : `Jumlah harus antara ${token.minAmount} - ${token.maxAmount}`,
       });
-      await swapUsdcToMon(amountResponse.amount);
+
+      await swapTokenToMon(tokenResponse.token, amountResponse.amount);
     }
 
     // Tampilkan balance setelah swap manual
