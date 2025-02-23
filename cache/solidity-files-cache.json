@@ -1,0 +1,41 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/Users/alkindiwilagabrata/Desktop/monad-testnetbot/contracts/MonadSwap.sol": {
+      "lastModificationDate": 1740326987565,
+      "contentHash": "71aaaea785c497cc8ce6d7f2d93cb6db",
+      "sourceName": "contracts/MonadSwap.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "IERC20",
+        "MonadSwap"
+      ]
+    }
+  }
+}
