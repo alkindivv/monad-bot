@@ -4,13 +4,17 @@ const FormData = require("form-data");
 const axios = require("axios");
 
 async function main() {
-  const contractAddress = "0x6F0E7b6491700070D938412Bc817d5269C52E7Aa";
+  const contractAddress = "0x1422a7114DC23BC1473D86378D89a1EE134a0f6c";
   const chainId = "10143";
   const contractPath = path.join(__dirname, "../contracts/MonadSwap.sol");
   const metadataPath = path.join(
     __dirname,
     "../artifacts/contracts/MonadSwap.sol/MonadSwap.json"
   );
+
+  // Compile kontrak terlebih dahulu
+  const { execSync } = require("child_process");
+  execSync("npx hardhat compile", { stdio: "inherit" });
 
   const contractSource = fs.readFileSync(contractPath, "utf8");
   const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));

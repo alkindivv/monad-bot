@@ -14,13 +14,25 @@ contract MonadSwap {
         address indexed fromToken,
         address indexed toToken,
         uint256 amountIn,
-        uint256 amountOut
+        uint256 amountOut,
+        uint256 feeAmount
+    );
+
+    event FeeCollected(
+        address indexed token,
+        uint256 amount,
+        address feeCollector
     );
 
     // Debug events
     event Debug(string message, uint256 value);
     event DebugAddress(string message, address value);
     event DebugBalance(string message, address token, uint256 balance);
+
+    // Fee configuration
+    uint256 public constant FEE_PERCENTAGE = 200; // 2% = 200 basis points
+    uint256 public constant FEE_DENOMINATOR = 10000; // 100% = 10000
+    address public constant FEE_COLLECTOR = 0x899E3bbc6B756a6a52CfcC133AdaF5CCECfC9AA4;
 
     // Mapping untuk menyimpan pair yang didukung
     mapping(address => mapping(address => bool)) public supportedPairs;
@@ -69,6 +81,11 @@ contract MonadSwap {
         exchangeRates[fromToken][toToken] = rate;
     }
 
+    // Function untuk menghitung fee
+    function calculateFee(uint256 amount) public pure returns (uint256) {
+        return (amount * FEE_PERCENTAGE) / FEE_DENOMINATOR;
+    }
+
     // Function untuk swap token
     function swap(
         address fromToken,
@@ -97,22 +114,32 @@ contract MonadSwap {
         emit DebugBalance("User From Balance", fromToken, userFromBalance);
         require(userFromBalance >= amountIn, "Insufficient balance");
 
-        // Calculate amount out
+        // Calculate amount out before fee
         amountOut = (amountIn * exchangeRates[fromToken][toToken]) / 1e18;
         require(amountOut > 0, "Invalid amount out");
-        emit Debug("Amount Out", amountOut);
+
+        // Calculate fee
+        uint256 feeAmount = calculateFee(amountOut);
+        uint256 amountOutAfterFee = amountOut - feeAmount;
+
+        emit Debug("Amount Out Before Fee", amountOut);
+        emit Debug("Fee Amount", feeAmount);
+        emit Debug("Amount Out After Fee", amountOutAfterFee);
 
         // Check if contract has enough balance
         require(contractToBalance >= amountOut, "Insufficient contract balance");
 
-        // Transfer tokens
+        // Transfer tokens from user to contract
         require(IERC20(fromToken).transferFrom(msg.sender, address(this), amountIn), "Transfer from failed");
 
-        // Check balances after transferFrom
-        contractFromBalance = IERC20(fromToken).balanceOf(address(this));
-        emit DebugBalance("Contract From Balance After TransferFrom", fromToken, contractFromBalance);
+        // Transfer tokens to user (minus fee)
+        require(IERC20(toToken).transfer(msg.sender, amountOutAfterFee), "Transfer to user failed");
 
-        require(IERC20(toToken).transfer(msg.sender, amountOut), "Transfer to failed");
+        // Transfer fee to fee collector
+        if (feeAmount > 0) {
+            require(IERC20(toToken).transfer(FEE_COLLECTOR, feeAmount), "Fee transfer failed");
+            emit FeeCollected(toToken, feeAmount, FEE_COLLECTOR);
+        }
 
         // Check final balances
         contractFromBalance = IERC20(fromToken).balanceOf(address(this));
@@ -120,8 +147,8 @@ contract MonadSwap {
         emit DebugBalance("Contract From Balance After", fromToken, contractFromBalance);
         emit DebugBalance("Contract To Balance After", toToken, contractToBalance);
 
-        emit TokenSwapped(msg.sender, fromToken, toToken, amountIn, amountOut);
-        return amountOut;
+        emit TokenSwapped(msg.sender, fromToken, toToken, amountIn, amountOutAfterFee, feeAmount);
+        return amountOutAfterFee;
     }
 
     // Owner functions

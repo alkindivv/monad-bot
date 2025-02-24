@@ -27,7 +27,7 @@ async function retryOperation(operation, maxRetries = 3) {
 }
 
 // Alamat kontrak dan token
-const MONADSWAP_ADDRESS = "0xb8B12Dfa04A21322127Af39E0533344CcCFed96b";
+const MONADSWAP_ADDRESS = "0x1422a7114DC23BC1473D86378D89a1EE134a0f6c";
 const TOKENS = {
   USDC: {
     address: "0xf817257fed379853cDe0fa4F97AB987181B1E5Ea",
@@ -53,6 +53,7 @@ const MONADSWAP_ABI = [
   "function exchangeRates(address, address) external view returns (uint256)",
   "function depositToken(address token, uint256 amount) external",
   "function owner() external view returns (address)",
+  "function calculateFee(uint256 amount) public pure returns (uint256)",
 ];
 
 const ERC20_ABI = [
@@ -250,15 +251,6 @@ async function performSwap(wallet, monadSwap) {
       console.log("✅ Token berhasil diapprove".green);
     }
 
-    // Check pair support dengan retry
-    const isPairSupported = await retryOperation(() =>
-      monadSwap.supportedPairs(fromToken.address, toToken.address)
-    );
-    if (!isPairSupported) {
-      console.log("❌ Pair tidak didukung".red);
-      return;
-    }
-
     // Get rate dan validasi dengan retry
     const rate = await retryOperation(() =>
       monadSwap.exchangeRates(fromToken.address, toToken.address)
@@ -268,13 +260,27 @@ async function performSwap(wallet, monadSwap) {
       return;
     }
 
-    const expectedOut = amountIn.mul(rate).div(ethers.constants.WeiPerEther);
+    const amountOut = amountIn.mul(rate).div(ethers.constants.WeiPerEther);
+    const feeAmount = await monadSwap.calculateFee(amountOut);
+    const amountOutAfterFee = amountOut.sub(feeAmount);
+
     console.log(`\n📊 Swap Details:`.yellow);
     console.log(`Rate: ${ethers.utils.formatUnits(rate, 18)}`.cyan);
     console.log(`Input: ${amount} ${fromToken.symbol}`.cyan);
     console.log(
-      `Expected output: ${ethers.utils.formatUnits(
-        expectedOut,
+      `Expected output (before fee): ${ethers.utils.formatUnits(
+        amountOut,
+        toToken.decimals
+      )} ${toToken.symbol}`.cyan
+    );
+    console.log(
+      `Fee (2%): ${ethers.utils.formatUnits(feeAmount, toToken.decimals)} ${
+        toToken.symbol
+      }`.cyan
+    );
+    console.log(
+      `Expected output (after fee): ${ethers.utils.formatUnits(
+        amountOutAfterFee,
         toToken.decimals
       )} ${toToken.symbol}`.cyan
     );
@@ -288,11 +294,9 @@ async function performSwap(wallet, monadSwap) {
 
     // Lakukan swap dengan retry
     console.log("\n🔄 Mengirim transaksi swap...".yellow);
-    const gasPrice = await wallet.provider.getGasPrice();
     const tx = await retryOperation(() =>
       monadSwap.swap(fromToken.address, toToken.address, amountIn, {
         gasLimit: 500000,
-        gasPrice,
       })
     );
 
@@ -304,13 +308,8 @@ async function performSwap(wallet, monadSwap) {
     if (receipt.status === 1) {
       console.log(`\n✅ Swap berhasil!`.green);
       console.log(`Gas used: ${receipt.gasUsed.toString()}`.cyan);
-      console.log(`\n📊 Balance setelah swap:`.yellow);
-      await checkBalance(wallet);
-    } else {
-      console.log(`\n❌ Transaksi gagal`.red);
-      console.log(`Gas used: ${receipt.gasUsed.toString()}`.cyan);
 
-      // Check events atau error
+      // Parse events
       const events = receipt.logs
         .map((log) => {
           try {
@@ -322,11 +321,36 @@ async function performSwap(wallet, monadSwap) {
         .filter(Boolean);
 
       if (events.length > 0) {
-        console.log("\nEvents dari transaksi:".yellow);
+        console.log("\n📊 Swap Events:".yellow);
         events.forEach((event) => {
-          console.log(event.name, event.args);
+          if (event.name === "TokenSwapped") {
+            console.log(
+              `Amount In: ${ethers.utils.formatUnits(
+                event.args.amountIn,
+                fromToken.decimals
+              )} ${fromToken.symbol}`.cyan
+            );
+            console.log(
+              `Amount Out: ${ethers.utils.formatUnits(
+                event.args.amountOut,
+                toToken.decimals
+              )} ${toToken.symbol}`.cyan
+            );
+            console.log(
+              `Fee: ${ethers.utils.formatUnits(
+                event.args.feeAmount,
+                toToken.decimals
+              )} ${toToken.symbol}`.cyan
+            );
+          }
         });
       }
+
+      console.log("\n📊 Balance setelah swap:".yellow);
+      await checkBalance(wallet);
+    } else {
+      console.log(`\n❌ Transaksi gagal`.red);
+      console.log(`Gas used: ${receipt.gasUsed.toString()}`.cyan);
     }
   } catch (error) {
     console.log("\n❌ Error detail:".red);
