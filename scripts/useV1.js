@@ -7,7 +7,7 @@ const prompts = require("prompts");
 const NETWORK_CONFIG = {
   url: "https://testnet-rpc.monad.xyz/",
   chainId: 10143,
-  name: "Monad Testnet",
+  name: "Monad Testne",
 };
 
 const EXPLORER_URL = "https://testnet.monadexplorer.com/tx/";
