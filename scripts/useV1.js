@@ -13,9 +13,11 @@ const NETWORK_CONFIG = {
 const EXPLORER_URL = "https://testnet.monadexplorer.com/tx/";
 
 // Contract addresses
-const PROXY_ADDRESS = "0xabB27315ea51983c5DFea264C4C6087f9aF12f4F";
-const BEAN_ROUTER = "0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89";
+const PROXY_ADDRESS = "0xf08c008fDc821e92d1e170EA61296299C6F0bDcD";
+const BEAN_ROUTER = "0x88B96aF200c8a9c35442C8AC6cd3D22695AaE4F0";
 const AMBIENT_ROUTER = "0x88B96aF200c8a9c35442C8AC6cd3D22695AaE4F0";
+
+// 0xca810d095e90daae6e867c19df6d9a8c56db2c89;
 
 // Token configuration
 const TOKENS = {

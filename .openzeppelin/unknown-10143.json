@@ -14,6 +14,21 @@
       "address": "0xabB27315ea51983c5DFea264C4C6087f9aF12f4F",
       "txHash": "0xdc2b02572edce7ab274983342dfeda65d4639db002ba2549074fc478cd242a7c",
       "kind": "transparent"
+    },
+    {
+      "address": "0x91B257FdB61dda62ACE999Fa0123983CC42f4F3f",
+      "txHash": "0x9b853ba97b139f66b07225bb295c832e6cf9bd16c1dcb33bc20cdfe10a918f8c",
+      "kind": "transparent"
+    },
+    {
+      "address": "0x0Ff00861e71Fb7c632cCf1eA50ea48B4b66A3e20",
+      "txHash": "0x42dbe093bba99f518d5d0101b030f0d9b5b5ed423552fd5a58065bcac2794325",
+      "kind": "transparent"
+    },
+    {
+      "address": "0xf08c008fDc821e92d1e170EA61296299C6F0bDcD",
+      "txHash": "0x16d9f53ab6f8359eecf3edb92971cb94716a4940991cb0926d88408cf35d3ddc",
+      "kind": "transparent"
     }
   ],
   "impls": {
@@ -226,6 +241,103 @@
           "t_mapping(t_address,t_bool)": {
             "label": "mapping(address => bool)",
             "numberOfBytes": "32"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          },
+          "t_uint8": {
+            "label": "uint8",
+            "numberOfBytes": "1"
+          }
+        },
+        "namespaces": {}
+      }
+    },
+    "f8ec30fcdbc2604b3ede3e636bf965009255b652dd8b7778f68a6d7472912ac4": {
+      "address": "0x8A28B7B4D36FA8Bd1625D9886b4A19d31E3ff07C",
+      "txHash": "0xb0d46b0fa1a986eeefc21f88eaa1d6ecd6ad15e8ae101b7e4f845adec6dcedc5",
+      "layout": {
+        "solcVersion": "0.8.22",
+        "storage": [
+          {
+            "label": "_initialized",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint8",
+            "contract": "Initializable",
+            "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:63",
+            "retypedFrom": "bool"
+          },
+          {
+            "label": "_initializing",
+            "offset": 1,
+            "slot": "0",
+            "type": "t_bool",
+            "contract": "Initializable",
+            "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:68"
+          },
+          {
+            "label": "__gap",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_array(t_uint256)50_storage",
+            "contract": "ContextUpgradeable",
+            "src": "@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol:36"
+          },
+          {
+            "label": "_owner",
+            "offset": 0,
+            "slot": "51",
+            "type": "t_address",
+            "contract": "OwnableUpgradeable",
+            "src": "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:22"
+          },
+          {
+            "label": "__gap",
+            "offset": 0,
+            "slot": "52",
+            "type": "t_array(t_uint256)49_storage",
+            "contract": "OwnableUpgradeable",
+            "src": "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:94"
+          },
+          {
+            "label": "beanRouter",
+            "offset": 0,
+            "slot": "101",
+            "type": "t_contract(IBeanRouter)2896",
+            "contract": "MonadSwapAggregatorV1",
+            "src": "contracts/MonadSwapAggregatorV1.sol:52"
+          },
+          {
+            "label": "wmon",
+            "offset": 0,
+            "slot": "102",
+            "type": "t_address",
+            "contract": "MonadSwapAggregatorV1",
+            "src": "contracts/MonadSwapAggregatorV1.sol:53"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_array(t_uint256)49_storage": {
+            "label": "uint256[49]",
+            "numberOfBytes": "1568"
+          },
+          "t_array(t_uint256)50_storage": {
+            "label": "uint256[50]",
+            "numberOfBytes": "1600"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_contract(IBeanRouter)2896": {
+            "label": "contract IBeanRouter",
+            "numberOfBytes": "20"
           },
           "t_uint256": {
             "label": "uint256",

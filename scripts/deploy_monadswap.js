@@ -4,7 +4,7 @@ async function main() {
   console.log("Memulai deployment MonadSwap Aggregator...");
 
   // Alamat konstan
-  const BEAN_ROUTER = "0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89";
+  const BEAN_ROUTER = "0xF6FFe4f3FdC8BBb7F70FFD48e61f17D1e343dDfD";
   const WMON = "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701";
 
   // 1. Deploy Implementation V1

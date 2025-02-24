@@ -41,11 +41,9 @@
 //   verifyURL: "https://testnet.monadexplorer.com/api",
 // };
 
-require("@nomiclabs/hardhat-waffle");
-require("@nomicfoundation/hardhat-verify");
-require("dotenv").config();
 require("@nomicfoundation/hardhat-toolbox");
 require("@openzeppelin/hardhat-upgrades");
+require("dotenv").config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -57,8 +55,8 @@ module.exports = {
         runs: 200,
       },
       metadata: {
-        bytecodeHash: "none", // disable ipfs
-        useLiteralContent: true, // store source code in the json file directly
+        bytecodeHash: "none",
+        useLiteralContent: true,
       },
     },
   },
