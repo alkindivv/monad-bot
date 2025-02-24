@@ -10,6 +10,12 @@ const BEAN_ROUTER = "0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89";
 
 // Token yang didukung
 const TOKENS = {
+  MON: {
+    address: "0x0000000000000000000000000000000000000000", // Address 0 untuk native token
+    decimals: 18,
+    symbol: "MON",
+    isNative: true,
+  },
   USDC: {
     address: "0xf817257fed379853cDe0fa4F97AB987181B1E5Ea",
     decimals: 6,
@@ -112,6 +118,7 @@ async function main() {
   // Check balance token lainnya
   console.log("\n💰 Checking token balances...".cyan);
   for (const [symbol, token] of Object.entries(TOKENS)) {
+    if (token.isNative) continue; // Skip MON karena sudah di-check
     const tokenContract = new ethers.Contract(
       token.address,
       ERC20_ABI,
@@ -161,39 +168,48 @@ async function main() {
     fromTokenResponse.token.decimals
   );
 
-  // Check balance dan approve
-  const tokenContract = new ethers.Contract(
-    fromTokenResponse.token.address,
-    ERC20_ABI,
-    wallet
-  );
-  const { balance } = await checkAllowanceAndBalance(
-    tokenContract,
-    wallet,
-    AGGREGATOR_ADDRESS
-  );
+  // Check balance
+  if (fromTokenResponse.token.isNative) {
+    const balance = await wallet.getBalance();
+    if (balance.lt(amountIn.add(ethers.utils.parseEther("0.01")))) {
+      // Tambah 0.01 MON untuk gas
+      console.log("\n❌ Balance MON tidak cukup (termasuk gas)".red);
+      return;
+    }
+  } else {
+    const tokenContract = new ethers.Contract(
+      fromTokenResponse.token.address,
+      ERC20_ABI,
+      wallet
+    );
+    const { balance } = await checkAllowanceAndBalance(
+      tokenContract,
+      wallet,
+      AGGREGATOR_ADDRESS
+    );
 
-  console.log("\n📊 Status Token:".cyan);
-  console.log(
-    `Balance: ${ethers.utils.formatUnits(
-      balance,
-      fromTokenResponse.token.decimals
-    )} ${fromTokenResponse.token.symbol}`
-  );
+    console.log("\n📊 Status Token:".cyan);
+    console.log(
+      `Balance: ${ethers.utils.formatUnits(
+        balance,
+        fromTokenResponse.token.decimals
+      )} ${fromTokenResponse.token.symbol}`
+    );
 
-  if (balance.lt(amountIn)) {
-    console.log("\n❌ Balance tidak cukup".red);
-    return;
+    if (balance.lt(amountIn)) {
+      console.log("\n❌ Balance tidak cukup".red);
+      return;
+    }
+
+    // Approve untuk aggregator dan router
+    await approveIfNeeded(
+      tokenContract,
+      AGGREGATOR_ADDRESS,
+      amountIn,
+      "Aggregator"
+    );
+    await approveIfNeeded(tokenContract, BEAN_ROUTER, amountIn, "Bean Router");
   }
-
-  // Approve untuk aggregator dan router
-  await approveIfNeeded(
-    tokenContract,
-    AGGREGATOR_ADDRESS,
-    amountIn,
-    "Aggregator"
-  );
-  await approveIfNeeded(tokenContract, BEAN_ROUTER, amountIn, "Bean Router");
 
   // Konfirmasi swap
   const confirm = await prompts({
@@ -207,13 +223,35 @@ async function main() {
     // Execute swap
     console.log("\n🔄 Executing swap...".yellow);
     try {
-      const tx = await aggregator.swap(
-        fromTokenResponse.token.address,
-        toTokenResponse.token.address,
-        amountIn,
-        0, // tidak perlu cek minimum output
-        { gasLimit: 500000 }
-      );
+      let tx;
+      if (fromTokenResponse.token.isNative) {
+        // Swap dari MON
+        tx = await aggregator.swap(
+          fromTokenResponse.token.address,
+          toTokenResponse.token.address,
+          amountIn,
+          0, // tidak perlu cek minimum output
+          { value: amountIn, gasLimit: 500000 }
+        );
+      } else if (toTokenResponse.token.isNative) {
+        // Swap ke MON
+        tx = await aggregator.swap(
+          fromTokenResponse.token.address,
+          toTokenResponse.token.address,
+          amountIn,
+          0, // tidak perlu cek minimum output
+          { gasLimit: 500000 }
+        );
+      } else {
+        // Swap antar token
+        tx = await aggregator.swap(
+          fromTokenResponse.token.address,
+          toTokenResponse.token.address,
+          amountIn,
+          0, // tidak perlu cek minimum output
+          { gasLimit: 500000 }
+        );
+      }
 
       console.log(`Swap tx: ${tx.hash}`);
       await tx.wait();
@@ -221,7 +259,11 @@ async function main() {
 
       // Check balance akhir
       console.log("\n💰 Balance setelah swap:".cyan);
+      const monBalance = await wallet.getBalance();
+      console.log(`MON: ${ethers.utils.formatEther(monBalance)}`);
+
       for (const [symbol, token] of Object.entries(TOKENS)) {
+        if (token.isNative) continue;
         const tokenContract = new ethers.Contract(
           token.address,
           ERC20_ABI,

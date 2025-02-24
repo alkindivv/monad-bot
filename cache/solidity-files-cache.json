@@ -38,8 +38,8 @@
       ]
     },
     "/Users/alkindiwilagabrata/Desktop/monad-testnetbot/contracts/MonadSwapAggregator.sol": {
-      "lastModificationDate": 1740380793082,
-      "contentHash": "e53c865595498ce64af3fbd94c168a99",
+      "lastModificationDate": 1740381269724,
+      "contentHash": "b3f7f9966a674cb8cc31f7b45e9b0b30",
       "sourceName": "contracts/MonadSwapAggregator.sol",
       "solcConfig": {
         "version": "0.8.19",
