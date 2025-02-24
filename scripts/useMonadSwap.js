@@ -5,8 +5,9 @@ const prompts = require("prompts");
 
 // Konfigurasi
 const RPC_URL = "https://testnet-rpc.monad.xyz/";
-const AGGREGATOR_ADDRESS = "0x4b032F001d8EAdE82dC6dCA3d7554B30fbE9e132";
+const AGGREGATOR_ADDRESS = "0x54bF22aDaf07620d6aFB6C6008f7B32bB9a873F4";
 const BEAN_ROUTER = "0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89";
+const WMON_ADDRESS = "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701";
 
 // Token yang didukung
 const TOKENS = {
@@ -35,7 +36,8 @@ const TOKENS = {
 
 // ABI untuk MonadSwapAggregator
 const AGGREGATOR_ABI = [
-  "function swap(address fromToken, address toToken, uint256 amountIn, uint256 amountOutMin) external returns (uint256)",
+  "function swap(address fromToken, address toToken, uint256 amountIn, uint256 amountOutMin) external payable returns (uint256)",
+  "function getAmountOut(address fromToken, address toToken, uint256 amountIn) public view returns (uint256)",
 ];
 
 const ERC20_ABI = [
@@ -185,7 +187,7 @@ async function main() {
     const { balance } = await checkAllowanceAndBalance(
       tokenContract,
       wallet,
-      AGGREGATOR_ADDRESS
+      BEAN_ROUTER
     );
 
     console.log("\n📊 Status Token:".cyan);
@@ -201,14 +203,8 @@ async function main() {
       return;
     }
 
-    // Approve untuk aggregator dan router
-    await approveIfNeeded(
-      tokenContract,
-      AGGREGATOR_ADDRESS,
-      amountIn,
-      "Aggregator"
-    );
-    await approveIfNeeded(tokenContract, BEAN_ROUTER, amountIn, "Bean Router");
+    // Approve untuk router
+    await approveIfNeeded(tokenContract, BEAN_ROUTER, amountIn, "Router");
   }
 
   // Konfirmasi swap
@@ -224,31 +220,36 @@ async function main() {
     console.log("\n🔄 Executing swap...".yellow);
     try {
       let tx;
+
+      // Get expected output amount
+      const amountOut = await aggregator.getAmountOut(
+        fromTokenResponse.token.address,
+        toTokenResponse.token.address,
+        amountIn
+      );
+
+      // Set minimum output amount (1% slippage)
+      const minAmountOut = amountOut.mul(99).div(100);
+
       if (fromTokenResponse.token.isNative) {
         // Swap dari MON
         tx = await aggregator.swap(
           fromTokenResponse.token.address,
           toTokenResponse.token.address,
           amountIn,
-          0, // tidak perlu cek minimum output
-          { value: amountIn, gasLimit: 500000 }
-        );
-      } else if (toTokenResponse.token.isNative) {
-        // Swap ke MON
-        tx = await aggregator.swap(
-          fromTokenResponse.token.address,
-          toTokenResponse.token.address,
-          amountIn,
-          0, // tidak perlu cek minimum output
-          { gasLimit: 500000 }
+          minAmountOut,
+          {
+            value: amountIn,
+            gasLimit: 500000,
+          }
         );
       } else {
-        // Swap antar token
+        // Swap dari token lain
         tx = await aggregator.swap(
           fromTokenResponse.token.address,
           toTokenResponse.token.address,
           amountIn,
-          0, // tidak perlu cek minimum output
+          minAmountOut,
           { gasLimit: 500000 }
         );
       }
