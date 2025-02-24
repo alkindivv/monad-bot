@@ -1,33 +1,14 @@
 require("dotenv").config();
 const { ethers } = require("ethers");
 const colors = require("colors");
+const prompts = require("prompts");
 
-// Fungsi untuk retry jika terjadi error RPC
-async function retryOperation(operation, maxRetries = 3) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (
-        error.code === "SERVER_ERROR" ||
-        error.message.includes("bad response")
-      ) {
-        console.log(
-          `\n⚠️ RPC Error, mencoba lagi dalam 5 detik... (${
-            i + 1
-          }/${maxRetries})`.yellow
-        );
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error("Max retries reached");
-}
+// Konfigurasi
+const RPC_URL = "https://testnet-rpc.monad.xyz/";
+const AGGREGATOR_ADDRESS = "0x4b032F001d8EAdE82dC6dCA3d7554B30fbE9e132";
+const BEAN_ROUTER = "0xCa810D095e90Daae6e867c19DF6D9A8C56db2c89";
 
-// Alamat kontrak dan token
-const MONADSWAP_ADDRESS = "0x1422a7114DC23BC1473D86378D89a1EE134a0f6c";
+// Token yang didukung
 const TOKENS = {
   USDC: {
     address: "0xf817257fed379853cDe0fa4F97AB987181B1E5Ea",
@@ -46,14 +27,9 @@ const TOKENS = {
   },
 };
 
-// ABI untuk MonadSwap dan ERC20
-const MONADSWAP_ABI = [
-  "function swap(address fromToken, address toToken, uint256 amountIn) external returns (uint256 amountOut)",
-  "function supportedPairs(address, address) external view returns (bool)",
-  "function exchangeRates(address, address) external view returns (uint256)",
-  "function depositToken(address token, uint256 amount) external",
-  "function owner() external view returns (address)",
-  "function calculateFee(uint256 amount) public pure returns (uint256)",
+// ABI untuk MonadSwapAggregator
+const AGGREGATOR_ABI = [
+  "function swap(address fromToken, address toToken, uint256 amountIn, uint256 amountOutMin) external returns (uint256)",
 ];
 
 const ERC20_ABI = [
@@ -64,430 +40,205 @@ const ERC20_ABI = [
   "function symbol() external view returns (string)",
 ];
 
+async function checkAllowanceAndBalance(tokenContract, wallet, spender) {
+  const [allowance, balance] = await Promise.all([
+    tokenContract.allowance(wallet.address, spender),
+    tokenContract.balanceOf(wallet.address),
+  ]);
+  return { allowance, balance };
+}
+
+async function approveIfNeeded(tokenContract, spender, amount, spenderName) {
+  const allowance = await tokenContract.allowance(
+    tokenContract.signer.address,
+    spender
+  );
+
+  if (allowance.lt(amount)) {
+    console.log(`\n🔄 Approve ${spenderName}...`.yellow);
+    const tx = await tokenContract.approve(
+      spender,
+      ethers.constants.MaxUint256
+    );
+    console.log(`Approval tx: ${tx.hash}`);
+    await tx.wait();
+    console.log(`✅ Approved untuk ${spenderName}`.green);
+    return true;
+  }
+
+  console.log(`\n✅ Sudah diapprove untuk ${spenderName}`.green);
+  return false;
+}
+
+// Fungsi untuk mengecek balance MON
+async function checkMonBalance(wallet) {
+  const balance = await wallet.getBalance();
+  console.log(`MON Balance: ${ethers.utils.formatEther(balance)}`);
+  return balance;
+}
+
+async function checkContractMonBalance(provider) {
+  const balance = await provider.getBalance(AGGREGATOR_ADDRESS);
+  console.log(`MON Balance Kontrak: ${ethers.utils.formatEther(balance)}`);
+  return balance;
+}
+
 async function main() {
   // Setup provider dan wallet
-  const provider = new ethers.providers.JsonRpcProvider(
-    "https://testnet-rpc.monad.xyz/"
-  );
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
   const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-
-  // Inisialisasi kontrak
-  const monadSwap = new ethers.Contract(
-    MONADSWAP_ADDRESS,
-    MONADSWAP_ABI,
+  const aggregator = new ethers.Contract(
+    AGGREGATOR_ADDRESS,
+    AGGREGATOR_ABI,
     wallet
   );
 
-  // Menu interaksi
-  const actions = {
-    1: checkBalance,
-    2: approveToken,
-    3: checkAllowance,
-    4: performSwap,
-    5: checkRate,
-    6: depositToken,
-  };
+  console.log("\n🚀 MonadSwap Simple Interface".green);
+  console.log("Wallet:", wallet.address);
+  console.log("Aggregator:", AGGREGATOR_ADDRESS);
 
-  console.log("\n🔄 MonadSwap Interaction Menu:".green);
-  console.log("1. Check Balance");
-  console.log("2. Approve Token");
-  console.log("3. Check Allowance");
-  console.log("4. Perform Swap");
-  console.log("5. Check Rate");
-  console.log("6. Deposit Token (Owner Only)");
+  // Check MON balance di wallet
+  console.log("\n💰 Checking MON balance...".cyan);
+  const walletBalance = await checkMonBalance(wallet);
 
-  const action = await prompt("Pilih aksi (1-6): ");
-  if (actions[action]) {
-    await actions[action](wallet, monadSwap);
-  } else {
-    console.log("Aksi tidak valid".red);
+  if (walletBalance.eq(0)) {
+    console.log(
+      "\n❌ Tidak ada MON untuk gas fee. Silakan dapatkan MON dari faucet terlebih dahulu."
+        .red
+    );
+    return;
   }
-}
 
-async function checkBalance(wallet) {
-  console.log("\n💰 Balance:".cyan);
-
+  // Check balance token lainnya
+  console.log("\n💰 Checking token balances...".cyan);
   for (const [symbol, token] of Object.entries(TOKENS)) {
-    const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
+    const tokenContract = new ethers.Contract(
+      token.address,
+      ERC20_ABI,
+      provider
+    );
     const balance = await tokenContract.balanceOf(wallet.address);
     console.log(
-      `${symbol}: ${ethers.utils.formatUnits(balance, token.decimals)}`.cyan
+      `${symbol}: ${ethers.utils.formatUnits(balance, token.decimals)}`
     );
   }
-}
 
-async function approveToken(wallet, monadSwap) {
-  console.log("\n🔑 Token Approval:".yellow);
-
-  // Pilih token
-  console.log("Pilih token untuk approve:");
-  Object.entries(TOKENS).forEach(([symbol], index) => {
-    console.log(`${index + 1}. ${symbol}`);
+  // Pilih token sumber
+  const fromTokenResponse = await prompts({
+    type: "select",
+    name: "token",
+    message: "Pilih token sumber:",
+    choices: Object.entries(TOKENS).map(([symbol, token]) => ({
+      title: symbol,
+      value: token,
+    })),
   });
 
-  const tokenIndex = await prompt("Pilih token (1-3): ");
-  const token = Object.values(TOKENS)[tokenIndex - 1];
-
-  if (!token) {
-    console.log("Token tidak valid".red);
-    return;
-  }
-
-  const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
-
-  try {
-    const tx = await tokenContract.approve(
-      MONADSWAP_ADDRESS,
-      ethers.constants.MaxUint256
-    );
-    console.log(`Transaction hash: ${tx.hash}`.cyan);
-    await tx.wait();
-    console.log(`✅ ${token.symbol} berhasil diapprove`.green);
-  } catch (error) {
-    console.error("❌ Approve gagal:".red, error.message);
-  }
-}
-
-async function checkAllowance(wallet, monadSwap) {
-  console.log("\n👀 Token Allowance:".yellow);
-
-  for (const [symbol, token] of Object.entries(TOKENS)) {
-    const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
-    const allowance = await tokenContract.allowance(
-      wallet.address,
-      MONADSWAP_ADDRESS
-    );
-    console.log(
-      `${symbol}: ${ethers.utils.formatUnits(allowance, token.decimals)}`.cyan
-    );
-  }
-}
-
-async function performSwap(wallet, monadSwap) {
-  console.log("\n🔄 Perform Swap:".yellow);
-
-  try {
-    // Check balance MON dulu
-    const monBalance = await retryOperation(() => wallet.getBalance());
-    console.log(
-      `\n💰 MON Balance: ${ethers.utils.formatEther(monBalance)}`.cyan
-    );
-    if (monBalance.lt(ethers.utils.parseEther("0.01"))) {
-      console.log("❌ MON balance tidak cukup untuk gas".red);
-      return;
-    }
-
-    // Pilih token sumber
-    console.log("\nPilih token sumber:");
-    Object.entries(TOKENS).forEach(([symbol], index) => {
-      console.log(`${index + 1}. ${symbol}`);
-    });
-
-    const fromTokenIndex = await prompt("Pilih token sumber (1-3): ");
-    const fromToken = Object.values(TOKENS)[fromTokenIndex - 1];
-
-    // Pilih token tujuan
-    console.log("\nPilih token tujuan:");
-    Object.entries(TOKENS)
-      .filter((_, index) => index !== fromTokenIndex - 1)
-      .forEach(([symbol], index) => {
-        console.log(`${index + 1}. ${symbol}`);
-      });
-
-    const toTokenIndex = await prompt("Pilih token tujuan (1-2): ");
-    const toToken = Object.values(TOKENS).filter(
-      (_, index) => index !== fromTokenIndex - 1
-    )[toTokenIndex - 1];
-
-    if (!fromToken || !toToken) {
-      console.log("Token tidak valid".red);
-      return;
-    }
-
-    // Check balance token sumber dengan retry
-    const tokenContract = new ethers.Contract(
-      fromToken.address,
-      ERC20_ABI,
-      wallet
-    );
-    const tokenBalance = await retryOperation(() =>
-      tokenContract.balanceOf(wallet.address)
-    );
-    console.log(
-      `\n💰 ${fromToken.symbol} Balance: ${ethers.utils.formatUnits(
-        tokenBalance,
-        fromToken.decimals
-      )}`.cyan
-    );
-
-    // Input jumlah
-    const amount = await prompt(`\nMasukkan jumlah ${fromToken.symbol}: `);
-    const amountIn = ethers.utils.parseUnits(amount, fromToken.decimals);
-
-    // Validasi jumlah
-    if (amountIn.gt(tokenBalance)) {
-      console.log("❌ Balance tidak cukup".red);
-      return;
-    }
-
-    // Check allowance dengan retry
-    const allowance = await retryOperation(() =>
-      tokenContract.allowance(wallet.address, MONADSWAP_ADDRESS)
-    );
-    console.log(
-      `\n👀 Current allowance: ${ethers.utils.formatUnits(
-        allowance,
-        fromToken.decimals
-      )} ${fromToken.symbol}`.cyan
-    );
-
-    if (allowance.lt(amountIn)) {
-      console.log("\n🔄 Melakukan approve token...".yellow);
-      const approveTx = await retryOperation(() =>
-        tokenContract.approve(MONADSWAP_ADDRESS, ethers.constants.MaxUint256)
-      );
-      console.log(`Transaction hash (approve): ${approveTx.hash}`.cyan);
-      await approveTx.wait();
-      console.log("✅ Token berhasil diapprove".green);
-    }
-
-    // Get rate dan validasi dengan retry
-    const rate = await retryOperation(() =>
-      monadSwap.exchangeRates(fromToken.address, toToken.address)
-    );
-    if (rate.isZero()) {
-      console.log("❌ Rate tidak valid (0)".red);
-      return;
-    }
-
-    const amountOut = amountIn.mul(rate).div(ethers.constants.WeiPerEther);
-    const feeAmount = await monadSwap.calculateFee(amountOut);
-    const amountOutAfterFee = amountOut.sub(feeAmount);
-
-    console.log(`\n📊 Swap Details:`.yellow);
-    console.log(`Rate: ${ethers.utils.formatUnits(rate, 18)}`.cyan);
-    console.log(`Input: ${amount} ${fromToken.symbol}`.cyan);
-    console.log(
-      `Expected output (before fee): ${ethers.utils.formatUnits(
-        amountOut,
-        toToken.decimals
-      )} ${toToken.symbol}`.cyan
-    );
-    console.log(
-      `Fee (2%): ${ethers.utils.formatUnits(feeAmount, toToken.decimals)} ${
-        toToken.symbol
-      }`.cyan
-    );
-    console.log(
-      `Expected output (after fee): ${ethers.utils.formatUnits(
-        amountOutAfterFee,
-        toToken.decimals
-      )} ${toToken.symbol}`.cyan
-    );
-
-    // Konfirmasi swap
-    const confirm = await prompt("\nLanjutkan swap? (y/n): ");
-    if (confirm.toLowerCase() !== "y") {
-      console.log("Swap dibatalkan".yellow);
-      return;
-    }
-
-    // Lakukan swap dengan retry
-    console.log("\n🔄 Mengirim transaksi swap...".yellow);
-    const tx = await retryOperation(() =>
-      monadSwap.swap(fromToken.address, toToken.address, amountIn, {
-        gasLimit: 500000,
-      })
-    );
-
-    console.log(`\nTransaction hash: ${tx.hash}`.cyan);
-    console.log("Menunggu konfirmasi...".yellow);
-
-    const receipt = await tx.wait();
-
-    if (receipt.status === 1) {
-      console.log(`\n✅ Swap berhasil!`.green);
-      console.log(`Gas used: ${receipt.gasUsed.toString()}`.cyan);
-
-      // Parse events
-      const events = receipt.logs
-        .map((log) => {
-          try {
-            return monadSwap.interface.parseLog(log);
-          } catch (e) {
-            return null;
-          }
-        })
-        .filter(Boolean);
-
-      if (events.length > 0) {
-        console.log("\n📊 Swap Events:".yellow);
-        events.forEach((event) => {
-          if (event.name === "TokenSwapped") {
-            console.log(
-              `Amount In: ${ethers.utils.formatUnits(
-                event.args.amountIn,
-                fromToken.decimals
-              )} ${fromToken.symbol}`.cyan
-            );
-            console.log(
-              `Amount Out: ${ethers.utils.formatUnits(
-                event.args.amountOut,
-                toToken.decimals
-              )} ${toToken.symbol}`.cyan
-            );
-            console.log(
-              `Fee: ${ethers.utils.formatUnits(
-                event.args.feeAmount,
-                toToken.decimals
-              )} ${toToken.symbol}`.cyan
-            );
-          }
-        });
-      }
-
-      console.log("\n📊 Balance setelah swap:".yellow);
-      await checkBalance(wallet);
-    } else {
-      console.log(`\n❌ Transaksi gagal`.red);
-      console.log(`Gas used: ${receipt.gasUsed.toString()}`.cyan);
-    }
-  } catch (error) {
-    console.log("\n❌ Error detail:".red);
-    if (error.reason) {
-      console.error("Reason:", error.reason);
-    }
-    if (error.code) {
-      console.error("Code:", error.code);
-    }
-    if (error.data) {
-      console.error("Data:", error.data);
-    }
-    if (error.transaction) {
-      console.error("Transaction data:", error.transaction.data);
-    }
-    console.error("Full error:", error);
-  }
-}
-
-async function checkRate(wallet, monadSwap) {
-  console.log("\n📊 Exchange Rates:".yellow);
-
-  for (const [fromSymbol, fromToken] of Object.entries(TOKENS)) {
-    for (const [toSymbol, toToken] of Object.entries(TOKENS)) {
-      if (fromSymbol !== toSymbol) {
-        try {
-          const rate = await monadSwap.exchangeRates(
-            fromToken.address,
-            toToken.address
-          );
-          const formattedRate = ethers.utils.formatUnits(rate, 18);
-          console.log(`${fromSymbol} -> ${toSymbol}: ${formattedRate}`.cyan);
-        } catch (error) {
-          console.log(`${fromSymbol} -> ${toSymbol}: Pair tidak didukung`.red);
-        }
-      }
-    }
-  }
-}
-
-async function depositToken(wallet, monadSwap) {
-  console.log("\n💰 Deposit Token:".yellow);
-
-  // Check if caller is owner
-  const owner = await monadSwap.owner();
-  if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
-    console.log("❌ Hanya owner yang bisa deposit token".red);
-    return;
-  }
-
-  // Pilih token
-  console.log("Pilih token untuk deposit:");
-  Object.entries(TOKENS).forEach(([symbol], index) => {
-    console.log(`${index + 1}. ${symbol}`);
+  // Pilih token tujuan
+  const toTokenResponse = await prompts({
+    type: "select",
+    name: "token",
+    message: "Pilih token tujuan:",
+    choices: Object.entries(TOKENS)
+      .filter(([symbol]) => symbol !== fromTokenResponse.token.symbol)
+      .map(([symbol, token]) => ({
+        title: symbol,
+        value: token,
+      })),
   });
-
-  const tokenIndex = await prompt("Pilih token (1-3): ");
-  const token = Object.values(TOKENS)[tokenIndex - 1];
-
-  if (!token) {
-    console.log("Token tidak valid".red);
-    return;
-  }
-
-  // Check balance
-  const tokenContract = new ethers.Contract(token.address, ERC20_ABI, wallet);
-  const balance = await tokenContract.balanceOf(wallet.address);
-  console.log(
-    `\n💰 ${token.symbol} Balance: ${ethers.utils.formatUnits(
-      balance,
-      token.decimals
-    )}`.cyan
-  );
 
   // Input jumlah
-  const amount = await prompt(
-    `\nMasukkan jumlah ${token.symbol} untuk deposit: `
-  );
-  const amountIn = ethers.utils.parseUnits(amount, token.decimals);
+  const amountResponse = await prompts({
+    type: "text",
+    name: "amount",
+    message: `Masukkan jumlah ${fromTokenResponse.token.symbol}:`,
+    validate: (value) => !isNaN(value) || "Masukkan angka yang valid",
+  });
 
-  // Check allowance
-  const allowance = await tokenContract.allowance(
-    wallet.address,
-    MONADSWAP_ADDRESS
+  const amount = amountResponse.amount;
+  const amountIn = ethers.utils.parseUnits(
+    amount,
+    fromTokenResponse.token.decimals
   );
-  if (allowance.lt(amountIn)) {
-    console.log("\n🔄 Melakukan approve token...".yellow);
-    const approveTx = await tokenContract.approve(
-      MONADSWAP_ADDRESS,
-      ethers.constants.MaxUint256
-    );
-    console.log(`Transaction hash (approve): ${approveTx.hash}`.cyan);
-    await approveTx.wait();
-    console.log("✅ Token berhasil diapprove".green);
+
+  // Check balance dan approve
+  const tokenContract = new ethers.Contract(
+    fromTokenResponse.token.address,
+    ERC20_ABI,
+    wallet
+  );
+  const { balance } = await checkAllowanceAndBalance(
+    tokenContract,
+    wallet,
+    AGGREGATOR_ADDRESS
+  );
+
+  console.log("\n📊 Status Token:".cyan);
+  console.log(
+    `Balance: ${ethers.utils.formatUnits(
+      balance,
+      fromTokenResponse.token.decimals
+    )} ${fromTokenResponse.token.symbol}`
+  );
+
+  if (balance.lt(amountIn)) {
+    console.log("\n❌ Balance tidak cukup".red);
+    return;
   }
 
-  try {
-    console.log("\n🔄 Mengirim transaksi deposit...".yellow);
-    const tx = await monadSwap.depositToken(token.address, amountIn, {
-      gasLimit: 300000,
-    });
-    console.log(`Transaction hash: ${tx.hash}`.cyan);
-    console.log("Menunggu konfirmasi...".yellow);
-    await tx.wait();
-    console.log("\n✅ Deposit berhasil!".green);
+  // Approve untuk aggregator dan router
+  await approveIfNeeded(
+    tokenContract,
+    AGGREGATOR_ADDRESS,
+    amountIn,
+    "Aggregator"
+  );
+  await approveIfNeeded(tokenContract, BEAN_ROUTER, amountIn, "Bean Router");
 
-    // Check balance kontrak
-    const contractBalance = await tokenContract.balanceOf(MONADSWAP_ADDRESS);
-    console.log(
-      `\n💰 Contract ${token.symbol} Balance: ${ethers.utils.formatUnits(
-        contractBalance,
-        token.decimals
-      )}`.cyan
-    );
-  } catch (error) {
-    console.log("\n❌ Error detail:".red);
-    console.error(error);
+  // Konfirmasi swap
+  const confirm = await prompts({
+    type: "confirm",
+    name: "value",
+    message: "Lanjutkan swap?",
+    initial: true,
+  });
+
+  if (confirm.value) {
+    // Execute swap
+    console.log("\n🔄 Executing swap...".yellow);
+    try {
+      const tx = await aggregator.swap(
+        fromTokenResponse.token.address,
+        toTokenResponse.token.address,
+        amountIn,
+        0, // tidak perlu cek minimum output
+        { gasLimit: 500000 }
+      );
+
+      console.log(`Swap tx: ${tx.hash}`);
+      await tx.wait();
+      console.log("✅ Swap berhasil!".green);
+
+      // Check balance akhir
+      console.log("\n💰 Balance setelah swap:".cyan);
+      for (const [symbol, token] of Object.entries(TOKENS)) {
+        const tokenContract = new ethers.Contract(
+          token.address,
+          ERC20_ABI,
+          provider
+        );
+        const balance = await tokenContract.balanceOf(wallet.address);
+        console.log(
+          `${symbol}: ${ethers.utils.formatUnits(balance, token.decimals)}`
+        );
+      }
+    } catch (error) {
+      console.log("\n❌ Swap gagal:".red, error.message);
+      if (error.transaction) {
+        console.log("Transaction data:", error.transaction.data);
+      }
+    }
   }
 }
 
-function prompt(question) {
-  const readline = require("readline").createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    readline.question(question, (answer) => {
-      readline.close();
-      resolve(answer);
-    });
-  });
-}
-
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch(console.error);

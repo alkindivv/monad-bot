@@ -36,6 +36,43 @@
         "IERC20",
         "MonadSwap"
       ]
+    },
+    "/Users/alkindiwilagabrata/Desktop/monad-testnetbot/contracts/MonadSwapAggregator.sol": {
+      "lastModificationDate": 1740380793082,
+      "contentHash": "e53c865595498ce64af3fbd94c168a99",
+      "sourceName": "contracts/MonadSwapAggregator.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "IBeanRouter",
+        "IERC20",
+        "MonadSwapAggregator"
+      ]
     }
   }
 }
